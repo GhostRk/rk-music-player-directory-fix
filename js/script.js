@@ -1,16 +1,13 @@
 console.log('Lets write JavaScript');
 
-// basePath attempts to get the root path of the application.
-// For most local server setups where your project folder is the server root,
-// this might simply resolve to "/". It's more critical when your app
-// is deployed in a subfolder on a larger web server.
-// For the purpose of this code, direct relative paths for `songs/` and `img/`
-// are used where appropriate because they are usually at the server root.
+// The basePath variable is largely unused with this static JSON approach,
+// as all resource paths (songs, images, json) are assumed to be
+// relative to the web server's root.
 const basePath = window.location.pathname.endsWith("/") ? window.location.pathname : window.location.pathname + "/";
 
 let currentSong = new Audio();
 let songs = []; // Initialize songs as an empty array
-let currFolder;
+let currFolder; // This will store the name of the currently selected folder (album)
 
 function secondsToMinutesSeconds(seconds) {
     if (isNaN(seconds) || seconds < 0) {
@@ -26,163 +23,165 @@ function secondsToMinutesSeconds(seconds) {
     return `${formattedMinutes}:${formattedSeconds}`;
 }
 
+// === UPDATED: getSongs to fetch from album-specific info.json ===
 async function getSongs(folder) {
     currFolder = folder;
-    console.log(`Attempting to fetch songs from: songs/${folder}/`);
-    let res = await fetch(`songs/${folder}/`); // Path relative to server root
-    let html = await res.text();
-    let tempDiv = document.createElement("div");
-    tempDiv.innerHTML = html;
-    let anchors = tempDiv.getElementsByTagName("a");
+    console.log(`Attempting to fetch songs from: songs/${folder}/info.json`);
 
-    songs = []; // Clear songs array for new folder
-    for (let anchor of anchors) {
-        let href = anchor.getAttribute("href");
-        if (href && href.toLowerCase().endsWith(".mp3")) {
-            // Push only the decoded filename
-            songs.push(decodeURIComponent(href.split("/").pop()));
+    try {
+        // Fetch the info.json file for the specific album folder
+        let res = await fetch(`songs/${folder}/info.json`);
+        if (!res.ok) {
+            // Log a more specific error if the file isn't found or has issues
+            if (res.status === 404) {
+                console.error(`Error 404: songs/${folder}/info.json not found. Please ensure the file exists at this path on Vercel and is correctly named.`);
+            } else {
+                console.error(`HTTP error! status: ${res.status} ${res.statusText} when fetching songs/${folder}/info.json`);
+            }
+            throw new Error(`Failed to fetch song list for folder ${folder}.`);
         }
-    }
+        songs = await res.json(); // Parse the response as a JSON array of song filenames
 
-    let songUL = document.querySelector(".songList ul");
-    if (!songUL) {
-        console.error("Error: .songList ul element not found for song list.");
+        let songUL = document.querySelector(".songList ul");
+        if (!songUL) {
+            console.error("Error: .songList ul element not found for song list.");
+            return [];
+        }
+        songUL.innerHTML = ""; // Clear existing songs before adding new ones
+
+        if (songs.length === 0) {
+            songUL.innerHTML = "<li>No songs found in this album.</li>";
+            console.warn(`No songs found in folder: ${folder} (from info.json). The info.json might be empty or incorrect.`);
+        } else {
+            for (const song of songs) {
+                // The song names in info.json should already be URL-decoded (plain filenames)
+                // for display, but encode for URL when playing.
+                const displaySongName = decodeURIComponent(song); // Just in case it's encoded in JSON
+                songUL.innerHTML += `
+                <li>
+                    <img class="invert" width="34" src="img/music.svg" alt="Music icon">
+                    <div class="info">
+                        <div>${displaySongName}</div>
+                        <div>Artist Name</div> </div>
+                    <div class="playnow">
+                        <span>Play Now</span>
+                        <img class="invert" src="img/play.svg" alt="Play button">
+                    </div>
+                </li>`;
+            }
+        }
+
+        // Attach event listeners to the newly created song list items
+        document.querySelectorAll(".songList ul li").forEach((li, i) => {
+            li.addEventListener("click", () => {
+                console.log("Clicked song:", songs[i]);
+                playMusic(songs[i]); // Pass the song filename as received from JSON
+            });
+        });
+
+        return songs;
+
+    } catch (error) {
+        console.error(`An error occurred in getSongs for folder ${folder}:`, error);
         return [];
     }
-    songUL.innerHTML = ""; // Clear existing songs before adding new ones
-
-    if (songs.length === 0) {
-        songUL.innerHTML = "<li>No songs found in this album.</li>";
-        console.warn(`No .mp3 songs found in folder: ${folder}`);
-    } else {
-        for (const song of songs) {
-            songUL.innerHTML += `
-            <li>
-                <img class="invert" width="34" src="img/music.svg" alt="Music icon">
-                <div class="info">
-                    <div>${song}</div> <div>Harry</div>
-                </div>
-                <div class="playnow">
-                    <span>Play Now</span>
-                    <img class="invert" src="img/play.svg" alt="Play button">
-                </div>
-            </li>`;
-        }
-    }
-
-    // Attach event listeners to the newly created song list items
-    document.querySelectorAll(".songList ul li").forEach((li, i) => {
-        li.addEventListener("click", () => {
-            console.log("Clicked song:", songs[i]);
-            playMusic(songs[i]);
-        });
-    });
-
-    return songs;
 }
 
 const playMusic = (track, pause = false) => {
-    // Path relative to server root
-    currentSong.src = `songs/${currFolder}/${encodeURIComponent(track)}`; // Encode track for URL
+    // Construct the full path to the song, encoding the track name for the URL
+    currentSong.src = `songs/${currFolder}/${encodeURIComponent(track)}`;
     console.log(`Playing: ${decodeURIComponent(track)} from folder: ${currFolder}`);
     if (!pause) {
         currentSong.play();
         document.getElementById("play").src = "img/pause.svg";
     }
+    // Update song info in UI, ensure it's decoded for display
     document.querySelector(".songinfo").innerHTML = decodeURIComponent(track);
     document.querySelector(".songtime").innerHTML = "00:00 / 00:00";
 };
 
+// === UPDATED: displayAlbums to fetch from top-level info.json ===
 async function displayAlbums() {
-    console.log("Displaying albums function called.");
-
-    // Fetch the directory listing for the 'songs/' folder.
-    // This assumes your 'songs' folder is directly at the root of your web server.
-    let res = await fetch(`songs/`);
-    console.log("Fetch response for songs/ directory:", res);
-
-    // Check if the fetch request was successful.
-    if (!res.ok) {
-        console.error(`Failed to fetch songs directory. Status: ${res.status} ${res.statusText}`);
-        console.error("Please ensure your web server is running and configured to serve directory listings for the 'songs/' folder (e.g., Python's http.server or Node's http-server).");
-        return; // Stop execution if fetching fails
-    }
-
-    let html = await res.text();
-    console.log("HTML content received from songs/ directory (truncated for brevity):", html.substring(0, 500) + "...");
-
-    let tempDiv = document.createElement("div");
-    tempDiv.innerHTML = html;
-    let anchors = tempDiv.getElementsByTagName("a");
-    console.log("Found anchors in directory listing:", anchors.length);
+    console.log("Displaying albums function called, fetching from songs/info.json.");
 
     let cardContainer = document.querySelector(".cardContainer");
     if (!cardContainer) {
         console.error("Error: Element with class '.cardContainer' not found in HTML. Cards will not be displayed.");
-        return; // Exit if the container element is missing
+        return;
     }
     cardContainer.innerHTML = ""; // Clear existing cards before adding new ones
-    console.log("Card container found:", cardContainer);
 
-    let foldersFound = 0;
-    for (let anchor of anchors) {
-        const href = anchor.getAttribute("href");
-        // console.log("Processing anchor href:", href); // Uncomment for very detailed link checking
+    try {
+        // Fetch the top-level info.json file that lists all albums
+        let res = await fetch(`songs/info.json`);
+        console.log("Fetch response for songs/info.json:", res);
 
-        // We are looking for directory links, which usually end with a '/'
-        if (!href || !href.endsWith("/")) {
-            // console.log("Skipping non-directory link:", href); // Uncomment to see skipped items
-            continue;
-        }
-
-        // Extract the folder name from the href
-        const parts = href.split("/").filter(Boolean); // Filter(Boolean) removes empty strings
-        const folder = parts[parts.length - 1]; // Get the last part, which should be the folder name
-
-        if (!folder) {
-            console.log("Skipping empty folder name derived from href:", href);
-            continue;
-        }
-
-        // The image path must be relative to your server's root.
-        // It's 'songs/folderName/cover.jpg' if 'songs' is at the root.
-        const coverImagePath = `songs/${folder}/cover.jpg`;
-
-        console.log(`Attempting to add card for folder: '${folder}' with cover image: '${coverImagePath}'`);
-
-        // Add the card HTML to the container
-        cardContainer.innerHTML += `
-        <div data-folder="${folder}" class="card">
-            <div class="play">
-                <img class="playIcon" src="img/play.svg" alt="Play button">
-            </div>
-            <img src="${coverImagePath}" alt="${folder} album cover">
-            <h2>${folder.replace(/[-_]/g, " ")}</h2>
-            <p>Click to view songs</p>
-        </div>`;
-        foldersFound++;
-    }
-
-    if (foldersFound === 0) {
-        cardContainer.innerHTML = "<p>No albums found. Please ensure 'songs/' contains subfolders with a 'cover.jpg' in each.</p>";
-        console.warn("No valid song folders found in the 'songs/' directory listing. Please check your server setup and folder structure.");
-    } else {
-        console.log(`Successfully added ${foldersFound} album cards.`);
-    }
-
-    // Attach event listeners to the newly created cards
-    document.querySelectorAll(".card").forEach(card => {
-        const folder = card.dataset.folder;
-        card.addEventListener("click", async () => {
-            console.log("Card clicked, attempting to get songs for folder:", folder);
-            songs = await getSongs(folder);
-            if (songs.length > 0) {
-                playMusic(songs[0]);
+        if (!res.ok) {
+            // Log a more specific error if the file isn't found or has issues
+            if (res.status === 404) {
+                console.error(`Error 404: songs/info.json not found. Please ensure the file exists at the root of your 'songs' directory on Vercel and is correctly named.`);
             } else {
-                console.warn(`No songs found in folder: ${folder}. Displaying default message.`);
+                console.error(`HTTP error! status: ${res.status} ${res.statusText} when fetching songs/info.json`);
             }
+            throw new Error(`Failed to fetch album list.`);
+        }
+        const albums = await res.json(); // Parse the response as a JSON array of album objects
+
+        if (albums.length === 0) {
+            cardContainer.innerHTML = "<p>No albums found in songs/info.json. The file might be empty or incorrect.</p>";
+            console.warn("No albums found from songs/info.json. Please check its content and format.");
+        }
+
+        let foldersFound = 0;
+        for (const album of albums) {
+            // Ensure the album object has a 'folder' property
+            if (!album.folder) {
+                console.warn("Skipping album entry due to missing 'folder' property:", album);
+                continue;
+            }
+            const folder = album.folder; // Get folder name from the JSON object
+            const title = album.title || folder.replace(/[-_]/g, " "); // Use title from JSON or derive
+            const description = album.description || "Click to view songs";
+
+            // The image path assumes 'cover.jpg' exists in each album folder
+            const coverImagePath = `songs/${folder}/cover.jpg`;
+
+            console.log(`Attempting to add card for folder: '${folder}' with cover image: '${coverImagePath}'`);
+
+            cardContainer.innerHTML += `
+            <div data-folder="${folder}" class="card">
+                <div class="play">
+                    <img class="playIcon" src="img/play.svg" alt="Play button">
+                </div>
+                <img src="${coverImagePath}" alt="${title} album cover">
+                <h2>${title}</h2>
+                <p>${description}</p>
+            </div>`;
+            foldersFound++;
+        }
+
+        if (foldersFound > 0) {
+            console.log(`Successfully added ${foldersFound} album cards from info.json.`);
+        }
+
+        // Attach event listeners to the newly created cards
+        document.querySelectorAll(".card").forEach(card => {
+            const folder = card.dataset.folder;
+            card.addEventListener("click", async () => {
+                console.log("Card clicked, attempting to get songs for folder:", folder);
+                songs = await getSongs(folder); // This will call the updated getSongs function
+                if (songs.length > 0) {
+                    playMusic(songs[0]); // Play the first song of the selected album
+                } else {
+                    console.warn(`No songs found in folder: ${folder} after info.json fetch, or fetch failed.`);
+                }
+            });
         });
-    });
+
+    } catch (error) {
+        console.error('An error occurred in displayAlbums:', error);
+        cardContainer.innerHTML = "<p>Failed to load albums. Please ensure songs/info.json exists and is valid, and check your browser console for errors.</p>";
+    }
 }
 
 async function main() {
@@ -190,17 +189,19 @@ async function main() {
     const previous = document.getElementById("previous");
     const next = document.getElementById("next");
 
-    // Initialize with a default album or your first album
-    await getSongs("mysongs"); // Make sure "mysongs" folder exists in your "songs" directory
+    // Initialize with a default album or your first album using the static JSON.
+    // Ensure 'mysongs' is a folder you have set up with a 'songs/mysongs/info.json'.
+    // This call will attempt to load the song list for the initial album.
+    await getSongs("mysongs");
     if (songs.length > 0) {
         playMusic(songs[0], true); // Play the first song but keep it paused initially
     } else {
-        console.warn("Initial album 'mysongs' had no songs. Player might not initialize fully.");
+        console.warn("Initial album 'mysongs' had no songs or failed to load. Player might not initialize fully.");
     }
 
-    await displayAlbums(); // This is where the cards are generated and displayed
+    await displayAlbums(); // This is where the cards are generated and displayed from the JSON
 
-    // Event Listeners for player controls
+    // Event Listeners for player controls (These remain the same)
     play.addEventListener("click", () => {
         if (currentSong.paused) {
             currentSong.play();
@@ -211,13 +212,12 @@ async function main() {
         }
     });
 
-    // Fix for Previous button
     previous.addEventListener("click", () => {
         if (!songs || songs.length === 0) {
             console.warn("No songs loaded to go previous.");
             return;
         }
-        // Decode the URI component to match what's in the 'songs' array
+        // Decode the URI component from currentSong.src to match what's in the 'songs' array
         const currentSongFileName = decodeURIComponent(currentSong.src.split("/").pop());
         const currentIndex = songs.indexOf(currentSongFileName);
         console.log("Previous button clicked. Current song:", currentSongFileName, "Index:", currentIndex);
@@ -231,13 +231,12 @@ async function main() {
         }
     });
 
-    // Fix for Next button
     next.addEventListener("click", () => {
         if (!songs || songs.length === 0) {
             console.warn("No songs loaded to go next.");
             return;
         }
-        // Decode the URI component to match what's in the 'songs' array
+        // Decode the URI component from currentSong.src to match what's in the 'songs' array
         const currentSongFileName = decodeURIComponent(currentSong.src.split("/").pop());
         const currentIndex = songs.indexOf(currentSongFileName);
         console.log("Next button clicked. Current song:", currentSongFileName, "Index:", currentIndex);
@@ -248,7 +247,7 @@ async function main() {
             console.log("Already at the last song or current song not found. Looping to first song.");
             playMusic(songs[0]);
         } else {
-             console.log("No songs available to play next.");
+            console.log("No songs available to play next.");
         }
     });
 
@@ -278,9 +277,9 @@ async function main() {
     // Volume control
     const volumeSlider = document.querySelector(".range input");
     if (volumeSlider) {
-        // Set initial volume if not already set (e.g., in CSS)
-        currentSong.volume = 0.5; // Set a default volume
-        volumeSlider.value = 50; // Update slider to match
+        // Set initial volume
+        currentSong.volume = 0.5;
+        volumeSlider.value = 50;
 
         volumeSlider.addEventListener("change", e => {
             const vol = parseInt(e.target.value, 10) / 100;

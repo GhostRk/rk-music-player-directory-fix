@@ -59,13 +59,13 @@ async function getSongs(folder) {
                 const displaySongName = decodeURIComponent(song); // Just in case it's encoded in JSON
                 songUL.innerHTML += `
                 <li>
-                    <img  width="34" src="img/music.svg" alt="Music icon">
+                    <img class="invert" width="34" src="img/music.svg" alt="Music icon">
                     <div class="info">
                         <div>${displaySongName}</div>
                         <div>Artist Name</div> </div>
                     <div class="playnow">
                         <span>Play Now</span>
-                        <img class="invert" src="img/play.svg" alt="Play button">
+                        <img  src="img/play.svg" alt="Play button">
                     </div>
                 </li>`;
             }
